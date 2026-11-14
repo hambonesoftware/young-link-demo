@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#202c24">
+  <meta name="description" content="Walk through a small-town roadside scene as young Link.">
+  <title>Young Link · Roadside</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./game.js"></script>
+</head>
+<body>
+  <main>
+    <div id="world"></div>
+    <header class="title">
+      <h1>Young Link</h1>
+      <p>Roadside, 2026</p>
+    </header>
+    <p class="status" id="status" role="status">Loading the roadside…</p>
+    <div class="toolbar" id="controls" hidden>
+      <p class="keyboard"><kbd>WASD</kbd> or <kbd>↑ ← ↓ →</kbd> Move <span>·</span> <kbd>Shift</kbd> Run <span>·</span> Drag to look</p>
+      <p class="touch-hint">Hold an arrow to walk · Swipe to look</p>
+      <button id="reset" type="button">Reset position</button>
+    </div>
+    <div class="dpad" id="dpad" aria-label="Movement controls" hidden>
+      <button type="button" data-move="ArrowUp" aria-label="Walk forward">↑</button>
+      <button type="button" data-move="ArrowLeft" aria-label="Walk left">←</button>
+      <button type="button" data-move="ArrowDown" aria-label="Walk backward">↓</button>
+      <button type="button" data-move="ArrowRight" aria-label="Walk right">→</button>
+    </div>
+  </main>
+</body>
+</html>
