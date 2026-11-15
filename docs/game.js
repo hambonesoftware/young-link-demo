@@ -1,6 +1,6 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry,
-  DirectionalLight, Euler, Fog, GLTFLoader, Group, HemisphereLight, InstancedMesh,
+  ACESFilmicToneMapping, AnimationMixer, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry,
+  DirectionalLight, Fog, GLTFLoader, Group, HemisphereLight, InstancedMesh,
   Mesh, MeshStandardMaterial, Object3D, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry,
   RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, Vector3, WebGLRenderer
 } from './assets/engine.js';
@@ -194,20 +194,44 @@ async function play() {
   const sun = sunset(scene);
   roadside(scene);
 
-  const model = await new GLTFLoader().loadAsync(new URL('./assets/link.glb', import.meta.url).href);
+  const model = await new GLTFLoader().loadAsync(new URL('./assets/link-animated.glb', import.meta.url).href);
   const actor = new Group();
-  const bones = new Map();
   model.scene.traverse(object => {
-    if (object.isBone) bones.set(object.name, {object, rest: object.quaternion.clone()});
     if (object.isSkinnedMesh) {
       object.castShadow = true;
       object.receiveShadow = true;
       object.frustumCulled = false;
     }
   });
-  if (!bones.has('ThighL') || !bones.has('Head')) throw new Error('The character skeleton is missing.');
   actor.add(model.scene);
   scene.add(actor);
+
+  const mixer = new AnimationMixer(model.scene);
+  const actions = Object.fromEntries(['Idle', 'Walk', 'Run'].map(name => {
+    const clip = model.animations.find(animation => animation.name === name);
+    if (!clip) throw new Error(`The ${name} animation is missing.`);
+    return [name, mixer.clipAction(clip)];
+  }));
+  const speeds = {Walk: 1.92, Run: 5.7};
+  const clipSpeeds = Object.fromEntries(model.parser.json.animations.map(animation =>
+    [animation.name, animation.extras?.['Nominal ground speed']]));
+  let animation = 'Idle';
+
+  function updateAnimation(next, speed, dt) {
+    if (next !== animation) {
+      const previous = actions[animation];
+      const current = actions[next];
+      const synchronized = next !== 'Idle' && animation !== 'Idle';
+      current.time = synchronized ? previous.time / previous.getClip().duration * current.getClip().duration : 0;
+      animation = next;
+    }
+    for (const [name, action] of Object.entries(actions)) {
+      const weight = damp(action.getEffectiveWeight(), Number(name === animation), 17, dt);
+      action.setEffectiveWeight(weight);
+      if (name !== 'Idle') action.setEffectiveTimeScale(clamp(speed / (clipSpeeds[name] || speeds[name]), .35, 1.22));
+    }
+    mixer.update(dt);
+  }
 
   const held = new Set();
   const touches = new Map();
@@ -242,15 +266,9 @@ async function play() {
   }
 
   let yaw = .43, pitch = .21, drag = null;
-  let phase = 0, stride = 0, facing = .26, lastTime = null;
+  let facing = .26, lastTime = null;
   const moving = new Vector3(), desired = new Vector3(), target = new Vector3();
   const desiredCamera = new Vector3();
-  const rotation = new Euler();
-  function pose(name, x, y = 0, z = 0) {
-    const joint = bones.get(name);
-    rotation.set(x, y, z);
-    joint.object.quaternion.setFromEuler(rotation).premultiply(joint.rest);
-  }
   const canvas = renderer.domElement;
   canvas.addEventListener('pointerdown', event => {
     if (drag || (event.pointerType === 'mouse' && event.button !== 0)) return;
@@ -280,8 +298,11 @@ async function play() {
     clearInput();
     actor.position.set(-1.65, 0, 1.3);
     moving.set(0, 0, 0);
-    stride = 0;
-    phase = 0;
+    animation = 'Idle';
+    for (const [name, action] of Object.entries(actions)) {
+      action.reset().setEffectiveWeight(Number(name === 'Idle')).play();
+    }
+    mixer.update(0);
     yaw = .46;
     pitch = .19;
     facing = .37;
@@ -308,7 +329,7 @@ async function play() {
     const right = Number(pressed('ArrowRight', 'KeyD')) - Number(pressed('ArrowLeft', 'KeyA'));
     const forward = Number(pressed('ArrowUp', 'KeyW')) - Number(pressed('ArrowDown', 'KeyS'));
     const sprint = pressed('ShiftLeft', 'ShiftRight');
-    const speed = sprint ? 5.7 : 3.12;
+    const speed = sprint ? speeds.Run : speeds.Walk;
     desired.set(right * Math.cos(yaw) - forward * Math.sin(yaw), 0,
       -right * Math.sin(yaw) - forward * Math.cos(yaw));
     if (right || forward) {
@@ -316,25 +337,15 @@ async function play() {
       facing = turn(facing, Math.atan2(desired.x, desired.z), 13, dt);
     }
     moving.lerp(desired, 1 - Math.exp(-12 * dt));
+    const oldX = actor.position.x;
+    const oldZ = actor.position.z;
     actor.position.x = clamp(actor.position.x + moving.x * dt, -13, 13);
     actor.position.z = clamp(actor.position.z + moving.z * dt, -43, 24);
     actor.rotation.y = facing;
 
-    stride = damp(stride, clamp(moving.length() / 2.7, 0, 1), 9, dt);
-    phase += dt * (sprint ? 10.7 : 7.8);
-    const a = phase, gait = stride * (sprint ? .74 : .47);
-    for (const [side, offset] of [['L', 0], ['R', Math.PI]]) {
-      const step = a + offset;
-      const swing = Math.sin(step);
-      pose('Thigh' + side, gait * swing);
-      pose('Shin' + side, -.80 * gait * Math.max(0, Math.cos(step)));
-      pose('Foot' + side, .28 * gait * Math.max(0, -Math.cos(step)));
-      pose('UpperArm' + side, -.72 * gait * swing);
-      pose('Forearm' + side, .29 * gait * (.55 + .45 * Math.cos(step)));
-    }
-    actor.position.y = .044 * stride * (1 - Math.cos(2 * a));
-    pose('Chest', .076 * stride, .10 * stride * Math.sin(a), .023 * stride * Math.sin(a));
-    pose('Head', -.053 * stride + .009 * Math.sin(time * .0024), -.064 * stride * Math.sin(a));
+    const groundSpeed = Math.hypot(actor.position.x - oldX, actor.position.z - oldZ) / (dt || 1);
+    const running = right || forward ? sprint : animation === 'Run';
+    updateAnimation(groundSpeed < .12 ? 'Idle' : running ? 'Run' : 'Walk', groundSpeed, dt);
     sun.target.position.set(actor.position.x, 0, actor.position.z);
     sun.position.copy(sun.target.position).add(new Vector3(-8, 7, -11));
     updateCamera(dt);
