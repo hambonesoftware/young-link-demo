@@ -254,7 +254,7 @@ async function play() {
   const sun = sunset(scene);
   roadside(scene);
 
-  const model = await new GLTFLoader().loadAsync(new URL('./assets/max-refined.glb', import.meta.url).href);
+  const model = await new GLTFLoader().loadAsync(new URL('./assets/max-refined.glb?v=5', import.meta.url).href);
   const actor = new Group();
   shadeCharacter(model.scene);
   actor.add(model.scene);
