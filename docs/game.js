@@ -189,7 +189,10 @@ function shadeCharacter(model) {
     mesh.castShadow = true;
     mesh.frustumCulled = false;
     const base = mesh.material;
-    const {toon_shadow, toon_highlight, toon_highlight_strength, toon_outline} = base.userData;
+    const {
+      toon_shadow, toon_highlight, toon_highlight_strength, toon_outline,
+      toon_ink_color = '#4a2b1c', toon_shadow_depth = 1
+    } = base.userData;
     if (!toon_shadow) {
       mesh.receiveShadow = true;
       continue;
@@ -201,23 +204,27 @@ function shadeCharacter(model) {
       shader.uniforms.characterShadow = {value: new Color(toon_shadow)};
       shader.uniforms.characterHighlight = {value: new Color(toon_highlight)};
       shader.uniforms.characterHighlightStrength = {value: toon_highlight_strength};
+      shader.uniforms.characterShadowDepth = {value: toon_shadow_depth};
       shader.fragmentShader = `
         uniform vec3 characterShadow;
         uniform vec3 characterHighlight;
         uniform float characterHighlightStrength;
+        uniform float characterShadowDepth;
       ` + shader.fragmentShader.replace('#include <opaque_fragment>', `
         vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
         float key = dot(worldNormal, normalize(vec3(-.33, .51, .82)));
-        outgoingLight = mix(characterShadow, diffuseColor.rgb, smoothstep(.14, .24, key));
+        float shadowDepth = mix(characterShadowDepth, 1.0, smoothstep(-.68, .14, key));
+        outgoingLight = mix(characterShadow * shadowDepth, diffuseColor.rgb, smoothstep(.14, .24, key));
+        float sheen = .11 * smoothstep(.24, .59, key) + .89 * smoothstep(.59, .702, key);
         outgoingLight = mix(outgoingLight, characterHighlight,
-          characterHighlightStrength * smoothstep(.624, .702, key));
+          characterHighlightStrength * sheen);
         #include <opaque_fragment>
       `);
     };
     mesh.material = material;
 
     if (toon_outline > 0) {
-      const ink = new MeshBasicMaterial({color: '#4a2b1c', side: BackSide, toneMapped: false});
+      const ink = new MeshBasicMaterial({color: toon_ink_color, side: BackSide, toneMapped: false});
       ink.onBeforeCompile = shader => {
         shader.uniforms.inkWidth = {value: toon_outline};
         shader.vertexShader = 'uniform float inkWidth;\n' + shader.vertexShader.replace(
@@ -247,7 +254,7 @@ async function play() {
   const sun = sunset(scene);
   roadside(scene);
 
-  const model = await new GLTFLoader().loadAsync(new URL('./assets/max.glb', import.meta.url).href);
+  const model = await new GLTFLoader().loadAsync(new URL('./assets/max-refined.glb', import.meta.url).href);
   const actor = new Group();
   shadeCharacter(model.scene);
   actor.add(model.scene);
