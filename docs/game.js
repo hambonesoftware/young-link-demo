@@ -1,8 +1,9 @@
 import {
-  ACESFilmicToneMapping, AnimationMixer, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry,
+  ACESFilmicToneMapping, AnimationMixer, BackSide, BoxGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry,
   DirectionalLight, Fog, GLTFLoader, Group, HemisphereLight, InstancedMesh,
-  Mesh, MeshStandardMaterial, Object3D, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry,
-  RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, SRGBColorSpace, Vector3, WebGLRenderer
+  Mesh, MeshBasicMaterial, MeshStandardMaterial, MeshToonMaterial, Object3D, PCFSoftShadowMap,
+  PerspectiveCamera, PlaneGeometry, RepeatWrapping, Scene, ShaderMaterial, SkinnedMesh, SphereGeometry,
+  SRGBColorSpace, Vector3, WebGLRenderer
 } from './assets/engine.js';
 
 const stage = document.querySelector('#world');
@@ -181,28 +182,74 @@ function sunset(scene) {
 
 const moveCodes = new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD','ShiftLeft','ShiftRight']);
 
+function shadeCharacter(model) {
+  const meshes = [];
+  model.traverse(object => { if (object.isSkinnedMesh) meshes.push(object); });
+  for (const mesh of meshes) {
+    mesh.castShadow = true;
+    mesh.frustumCulled = false;
+    const base = mesh.material;
+    const {toon_shadow, toon_highlight, toon_highlight_strength, toon_outline} = base.userData;
+    if (!toon_shadow) {
+      mesh.receiveShadow = true;
+      continue;
+    }
+    const material = new MeshToonMaterial({
+      color: base.color, side: base.side, vertexColors: base.vertexColors, toneMapped: false
+    });
+    material.onBeforeCompile = shader => {
+      shader.uniforms.characterShadow = {value: new Color(toon_shadow)};
+      shader.uniforms.characterHighlight = {value: new Color(toon_highlight)};
+      shader.uniforms.characterHighlightStrength = {value: toon_highlight_strength};
+      shader.fragmentShader = `
+        uniform vec3 characterShadow;
+        uniform vec3 characterHighlight;
+        uniform float characterHighlightStrength;
+      ` + shader.fragmentShader.replace('#include <opaque_fragment>', `
+        vec3 worldNormal = inverseTransformDirection(normal, viewMatrix);
+        float key = dot(worldNormal, normalize(vec3(-.33, .51, .82)));
+        outgoingLight = mix(characterShadow, diffuseColor.rgb, smoothstep(.14, .24, key));
+        outgoingLight = mix(outgoingLight, characterHighlight,
+          characterHighlightStrength * smoothstep(.624, .702, key));
+        #include <opaque_fragment>
+      `);
+    };
+    mesh.material = material;
+
+    if (toon_outline > 0) {
+      const ink = new MeshBasicMaterial({color: '#4a2b1c', side: BackSide, toneMapped: false});
+      ink.onBeforeCompile = shader => {
+        shader.uniforms.inkWidth = {value: toon_outline};
+        shader.vertexShader = 'uniform float inkWidth;\n' + shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n transformed += normal * inkWidth;'
+        );
+      };
+      const outline = new SkinnedMesh(mesh.geometry, ink);
+      outline.bind(mesh.skeleton, mesh.bindMatrix);
+      outline.bindMode = mesh.bindMode;
+      outline.frustumCulled = false;
+      mesh.add(outline);
+    }
+  }
+}
+
 async function play() {
   const renderer = new WebGLRenderer({antialias: true});
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFSoftShadowMap;
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.toneMappingExposure = .96;
-  renderer.domElement.setAttribute('aria-label', '3D game world. Use the arrow keys or WASD to move Link.');
+  renderer.domElement.setAttribute('aria-label', '3D game world. Use the arrow keys or WASD to move Max.');
   stage.append(renderer.domElement);
   const scene = new Scene();
   const camera = new PerspectiveCamera(37, 1, .1, 180);
   const sun = sunset(scene);
   roadside(scene);
 
-  const model = await new GLTFLoader().loadAsync(new URL('./assets/link-animated.glb', import.meta.url).href);
+  const model = await new GLTFLoader().loadAsync(new URL('./assets/max.glb', import.meta.url).href);
   const actor = new Group();
-  model.scene.traverse(object => {
-    if (object.isSkinnedMesh) {
-      object.castShadow = true;
-      object.receiveShadow = true;
-      object.frustumCulled = false;
-    }
-  });
+  shadeCharacter(model.scene);
   actor.add(model.scene);
   scene.add(actor);
 
@@ -305,7 +352,7 @@ async function play() {
     mixer.update(0);
     yaw = .46;
     pitch = .19;
-    facing = .37;
+    facing = .13;
     actor.rotation.y = facing;
     updateCamera(100);
   }

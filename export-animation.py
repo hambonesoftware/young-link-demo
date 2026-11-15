@@ -1,6 +1,6 @@
-"""Bake the Young Link control rig's Idle, Walk and Run actions for the demo.
+"""Bake the character control rig's Idle, Walk and Run actions for the demo.
 
-blender -b young-link-animated.blend --python export-animation.py -- docs/assets/link.glb
+blender -b max-animated.blend --python export-animation.py -- docs/assets/max.glb
 """
 
 from pathlib import Path
@@ -18,8 +18,9 @@ def export(output):
     if rig.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
 
-    skeleton = bpy.data.armatures.new('Link Deform Skeleton')
-    exported_rig = bpy.data.objects.new('Link', skeleton)
+    character = scene.get('Character', 'Link')
+    skeleton = bpy.data.armatures.new(f'{character} Deform Skeleton')
+    exported_rig = bpy.data.objects.new(character, skeleton)
     scene.collection.objects.link(exported_rig)
     bpy.ops.object.select_all(action='DESELECT')
     exported_rig.select_set(True)
@@ -88,6 +89,9 @@ def export(output):
         shader = mat.node_tree.nodes.get('Principled BSDF')
         if not shader:
             continue
+        if mat.get('toon_shadow'):
+            output_node = mat.node_tree.nodes.get('Material Output')
+            mat.node_tree.links.new(shader.outputs['BSDF'], output_node.inputs['Surface'])
         for link in list(shader.inputs['Normal'].links):
             mat.node_tree.links.remove(link)
         for link in list(shader.inputs['Base Color'].links):
